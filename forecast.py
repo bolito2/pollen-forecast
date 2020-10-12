@@ -9,8 +9,10 @@ import numpy as np
 
 import tensorflow as tf
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, LSTM, Dense, Lambda, Concatenate
+from tensorflow.keras.layers import Input, LSTM, Dense, Lambda, Concatenate, Softmax, Layer
 from tensorflow.keras.optimizers import Adam
+
+import random
 
 tf.get_logger().setLevel('INFO')
 
@@ -57,40 +59,68 @@ def get_X_pred(X_in):
     return X_pred
 
 
-def get_Y_i(Y_pred, i):
-    return Y_pred[:, i, :]
+def get_X_j(X, j, squeeze=True):
+    if squeeze:
+        return X[:, j, :]
+    else:
+        return X[:, j:j+1, :]
+
+
+def matmul(X_top, scores):
+    return K.dot(X_top, scores)
+
+
+class GetContext(Layer):
+  def __init__(self):
+      super(GetContext, self).__init__()
+
+
+  def call(self, X_out, scores):  # Defines the computation from inputs to outputs
+      scores_reshaped = tf.reshape(scores, [-1, scores.shape[1], 1])
+      return tf.reshape(tf.matmul(tf.transpose(X_out, perm=[0, 2, 1]), scores_reshaped), [-1, X_out.shape[2]])
 
 def create_model():
     X_in = Input(shape=(window_size, n), name='Input')
-    print('X_in.shape =',X_in.shape)
 
     X_anal = Lambda(get_X_anal, output_shape=(anal_size, n), name='slice_anal')(X_in)
-    print('X_anal.shape =',X_anal.shape)
-
     X_pred = Lambda(get_X_pred, output_shape=(pred_size, n), name='slice_pred')(X_in)
-    print('X_pred.shape =',X_pred.shape)
-    #analyze the data, we don't need an output, only the hidden state of the LSTM
-    X_bot, h_bot, c_bot = LSTM(64, return_state=True, return_sequences=True, name='analysis_bot')(X_anal)
-    print('X_bot.shape =', X_bot.shape)
-    _, h_top, c_top = LSTM(64, return_state=True, name='analysis_top')(X_bot)
 
+    #analyze the data, saving the hidden states
+    X_top, h_top, c_top = LSTM(64, return_sequences=True, return_state=True, name='analysis_top')(X_anal)
+    state = [h_top, c_top]
 
-    bot_state = [h_bot, c_bot]
-    top_state = [h_top, c_top]
-    Y_bot = LSTM(64, return_sequences=True, name='prediction_bot')(X_pred, initial_state=bot_state)
-    print('Y_bot.shape =', Y_bot.shape)
-    Y_pred = LSTM(64, return_sequences=True, name='prediction_top')(Y_bot, initial_state=top_state)
-    print('Y_pred.shape =',Y_pred.shape)
+    X_out = []
+    X_out_timestep = []
+    scoring = []
+    for j in range(anal_size):
+        X_out.append(Lambda(get_X_j, arguments={'j': j}, name='get-memory-{}'.format(j))(X_top))
+        scoring.append(Dense(units=1, name='scoring-{}'.format(j)))
+        X_out_timestep.append(Lambda(get_X_j, arguments={'j': j, 'squeeze': False}, name='get-x-{}'.format(j))(X_top))
+
+    last = X_out[-1]
 
     Y_list = []
     for i in range(pred_size):
-        slicer = Lambda(get_Y_i, arguments={'i': i}, name='slicer-{}'.format(i))
+        scores_list = []
+        for j in range(anal_size):
+            concat = Concatenate(axis=1, name='concat-for-scoring-{}-{}'.format(i, j))([last, X_out[j]])
+            scores_list.append(scoring[j](concat))
+        scores = Concatenate(axis=1)(scores_list)
+        scores = Softmax(axis=1)(scores)
+
+        context = GetContext()(X_top, scores)
+
+        X_j = X_out_timestep[j]
+        LSTM_out, h, c = LSTM(64, return_state=True, name='prediction-{}'.format(i))(X_j, initial_state=state)
+        state = [h, c]
+
+        Y_step = Concatenate(axis=1)([LSTM_out, context])
+
+        last = LSTM_out
         densor = Dense(units=1, name='densor-{}'.format(i))
-        Y_list.append(densor(slicer(Y_pred)))
-    print('Y_list[0].shape =',Y_list[0].shape)
+        Y_list.append(densor(Y_step))
 
     Y = Concatenate(axis=1)(Y_list)
-    print('Y.shape =', Y.shape)
 
     model = Model(inputs=X_in, outputs=Y)
     model.summary()
@@ -103,8 +133,10 @@ def train_model(model, learning_rate=0.001, epochs=10, batch_size=128):
     opt = Adam(learning_rate=learning_rate, beta_1 = 0.9, beta_2 = 0.99, epsilon=1e-7, clipnorm=1)
     model.compile(loss='mse', optimizer=opt, metrics=['mae'])
 
-    fitting = model.fit(X_train, Y_train, batch_size=batch_size, epochs = epochs, validation_data=(X_dev, Y_dev), shuffle=True)
+    return model.fit(X_train, Y_train, batch_size=batch_size, epochs = epochs, validation_data=(X_dev, Y_dev), shuffle=True)
 
+
+def plot_loss(fitting):
     plt.plot(np.array(fitting.history['loss']), color='r')
     plt.plot(np.array(fitting.history['val_loss']), color='b')
     plt.show()
@@ -126,12 +158,21 @@ def train_model(model, learning_rate=0.001, epochs=10, batch_size=128):
 #     - Added one DEEP layer to the LSTM
 # - v3.2 val_loss = 0.69 after 20 epochs
 #     - Removed batching
+# - v4.0 val_loss = 0.4 after epochs
+#     - Added attention
+def print_predictions(model, rows=5):
 
-def print_predictions(model, start_windows=100, rows=5):
+    start_windows = random.randint(0, X_dev.shape[0] - rows*5)
 
-    X_pred = X_dev[start_windows:start_windows+rows*5]
-    Y_pred = np.array(model(X_pred))
-    Y_true = Y_dev[start_windows:start_windows+rows*5]
+    f = h5py.File('proc_data.h5', 'r')
+    parameters = f['parameters']
+
+    pollen_mean = parameters[0, 2]
+    pollen_std = parameters[0, 2]
+
+    X_pred = np.array(X_dev[start_windows:start_windows+rows*5])
+    Y_pred = np.array(np.array(model(X_pred)))
+    Y_true = np.array(Y_dev[start_windows:start_windows+rows*5])
 
     fig = plt.figure(figsize=(12, 12))
 
@@ -139,9 +180,9 @@ def print_predictions(model, start_windows=100, rows=5):
         a = fig.add_subplot(rows, 5, i + 1)
         a.set_ylim([0, 7])
 
-        a.plot(range(window_size), X_pred[i, :, 2], color='b')
-        a.plot(range(anal_size, window_size), Y_pred[i], color='r')
-        a.plot(range(anal_size, window_size), Y_true[i], color='g')
+        a.plot(range(window_size), X_pred[i, :, 2]*pollen_std + pollen_mean, color='b')
+        a.plot(range(anal_size, window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
+        a.plot(range(anal_size, window_size), Y_true[i]*pollen_std + pollen_mean, color='g')
 
     plt.show()
 
