@@ -12,6 +12,8 @@ from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Lambda, Concatenate, Softmax, Layer
 from tensorflow.keras.optimizers import Adam
 
+from tensorflow.keras.models import load_model
+
 import random
 
 tf.get_logger().setLevel('INFO')
@@ -20,214 +22,233 @@ tf.get_logger().setLevel('INFO')
 
 print(tf.config.list_physical_devices('GPU'))
 
-# We import all the data, already prepared
 
-f = h5py.File('proc_data.h5', 'r')
-
-X_train, Y_train, X_dev, Y_dev, X_test, Y_test = np.array(f['X_train']), np.array(f['Y_train']), np.array(f['X_dev']), np.array(f['Y_dev']), f['X_test'], f['Y_test']
-
-m_train = X_train.shape[0]
-window_size = X_train.shape[1]
-pred_size = Y_train.shape[1]
-anal_size = window_size - pred_size
-n = X_train.shape[2]
-
-print('m_train =', m_train)
-print('window_size =', window_size)
-print(' - anal_size =', anal_size)
-print(' - pred_size =', pred_size)
-print('n =', n)
-
-print('X_train.shape =', X_train.shape)
-print('Y_train.shape =', Y_train.shape)
-
-f.close()
-
-# We introduce this methods to split each X_train case into the analysis and prediction part
-
-def get_X_anal(X_in):
-    X_anal = X_in[:, :anal_size, :]
-    return X_anal
-
-
-def get_X_pred(X_in):
-    X_before_pollen = X_in[:, anal_size:window_size, :2]
-    X_after_pollen = X_in[:, anal_size:window_size, 3:]
-    
-    X_pred = tf.concat([X_before_pollen, X_after_pollen], axis=2)
-    
-    return X_pred
-
-
-def get_X_j(X, j, squeeze=True):
-    if squeeze:
-        return X[:, j, :]
-    else:
-        return X[:, j:j+1, :]
-
-
-def matmul(X_top, scores):
-    return K.dot(X_top, scores)
-
-
+# Class to get the context from the scores given to each analysis cell
 class GetContext(Layer):
-  def __init__(self):
-      super(GetContext, self).__init__()
+    # We don't have to create any parameter whe building this layer, as it is only a matrix multiplication
+    def __init__(self):
+        super(GetContext, self).__init__()
+
+    # TODO
+    def call(self, anal, scores):
+        # Inputs:
+        #   anal -> (m, anal_size, n) shaped tensor, represents the output of the analysis LSTM
+        #   scores -> (m, anal_size) shaped tensor, represents the score given to each analysis timestep
+        # the scores tensor is reshaped to be (m, anal_size, 1)
+        scores_reshaped = tf.reshape(scores, [-1, scores.shape[1], 1])
+        # Outputs:
+        #   The output is the matrix product anal^t * scores_reshaped, ignoring the first dimension.
+        #   This is equivalent to summing all anal rows(timesteps) multiplied by their correspondent score
+        #   So, what this is doing is computing the context of the prediction
+        #   The product outputs a (m, n, 1) which is reduced to (m, n)
+        return tf.reshape(tf.matmul(tf.transpose(anal, perm=[0, 2, 1]), scores_reshaped), [-1, anal.shape[2]])
 
 
-  def call(self, X_out, scores):  # Defines the computation from inputs to outputs
-      scores_reshaped = tf.reshape(scores, [-1, scores.shape[1], 1])
-      return tf.reshape(tf.matmul(tf.transpose(X_out, perm=[0, 2, 1]), scores_reshaped), [-1, X_out.shape[2]])
+class PoleNN:
+    def __init__(self):
+        # We import all the data, already prepared
+        f = h5py.File('proc_data.h5', 'r')
 
-def create_model():
-    X_in = Input(shape=(window_size, n), name='Input')
+        self.X_train, self.Y_train, self.X_dev, self.Y_dev, self.X_test, self.Y_test = np.array(f['X_train']), np.array(f['Y_train']), np.array(f['X_dev']), np.array(f['Y_dev']), f['X_test'], f['Y_test']
 
-    X_anal = Lambda(get_X_anal, output_shape=(anal_size, n), name='slice_anal')(X_in)
-    X_pred = Lambda(get_X_pred, output_shape=(pred_size, n), name='slice_pred')(X_in)
+        # The parameters of the NN are computed and printed here
+        # The X tensors are (m x window_size x n)
+        # n is the number of features
+        self.m_train = self.X_train.shape[0]
+        self.window_size = self.X_train.shape[1]
+        self.pred_size = self.Y_train.shape[1]
+        self.anal_size = self.window_size - self.pred_size
+        self.n = self.X_train.shape[2]
 
-    #analyze the data, saving the hidden states
-    X_top, h_top, c_top = LSTM(64, return_sequences=True, return_state=True, name='analysis_top')(X_anal)
-    state = [h_top, c_top]
+        print('m_train =', self.m_train)
+        print('window_size =', self.window_size)
+        print(' - anal_size =', self.anal_size)
+        print(' - pred_size =', self.pred_size)
+        print('n =', self.n)
 
-    X_out = []
-    X_out_timestep = []
-    scoring = []
-    for j in range(anal_size):
-        X_out.append(Lambda(get_X_j, arguments={'j': j}, name='get-memory-{}'.format(j))(X_top))
-        scoring.append(Dense(units=1, name='scoring-{}'.format(j)))
-        X_out_timestep.append(Lambda(get_X_j, arguments={'j': j, 'squeeze': False}, name='get-x-{}'.format(j))(X_top))
+        print('X_train.shape =', self.X_train.shape)
+        print('Y_train.shape =', self.Y_train.shape)
 
-    last = X_out[-1]
+        f.close()
 
-    Y_list = []
-    for i in range(pred_size):
-        scores_list = []
-        for j in range(anal_size):
-            concat = Concatenate(axis=1, name='concat-for-scoring-{}-{}'.format(i, j))([last, X_out[j]])
-            scores_list.append(scoring[j](concat))
-        scores = Concatenate(axis=1)(scores_list)
-        scores = Softmax(axis=1)(scores)
+        self.model = 'not loaded'
+        self.fitting = []
 
-        context = GetContext()(X_top, scores)
+    # --- METHODS TO BUILD MODEL ---
 
-        X_j = X_out_timestep[j]
-        LSTM_out, h, c = LSTM(64, return_state=True, name='prediction-{}'.format(i))(X_j, initial_state=state)
-        state = [h, c]
+    # We introduce these methods to split each X_train case into the analysis and prediction part
+    # Second dimension is the timeline, so we split in there according to anal_size and pred_size
+    def get_X_anal(self, X_in):
+        X_anal = X_in[:, :self.anal_size, :]
+        return X_anal
 
-        Y_step = Concatenate(axis=1)([LSTM_out, context])
+    def get_X_pred(self, X_in):
+        X_before_pollen = X_in[:, self.anal_size:self.window_size, :2]
+        X_after_pollen = X_in[:, self.anal_size:self.window_size, 3:]
 
-        last = LSTM_out
-        densor = Dense(units=1, name='densor-{}'.format(i))
-        Y_list.append(densor(Y_step))
+        X_pred = tf.concat([X_before_pollen, X_after_pollen], axis=2)
 
-    Y = Concatenate(axis=1)(Y_list)
+        return X_pred
 
-    model = Model(inputs=X_in, outputs=Y)
-    model.summary()
+    # We get a single time point from a window
+    # If squeeze is True we return a 2 dimensional tensor(m x n), else we output the same dimension that entered
+    def get_X_j(self, X, j, squeeze=True):
+        if squeeze:
+            return X[:, j, :]
+        else:
+            return X[:, j:j+1, :]
 
-    return model
+    # Method to create the model from scratch
+    def create(self):
+        # We get the input. THe first dimension(m) is omitted
+        X_in = Input(shape=(self.window_size, self.n), name='Input')
 
+        # The input is split between the first anal_size time points and the last pred_size, respectively
+        X_anal = Lambda(self.get_X_anal, output_shape=(self.anal_size, self.n), name='slice_anal')(X_in)
+        X_pred = Lambda(self.get_X_pred, output_shape=(self.pred_size, self.n), name='slice_pred')(X_in)
 
-def train_model(model, learning_rate=0.001, epochs=10, batch_size=128):
+        # X_anal is passed through a LSTM that analyzes it and stores all it's outputs to apply the attention model later
+        # The last hidden state is also stored, it will be used to start the prediction LSTM
+        anal, h_anal, c_anal = LSTM(64, return_sequences=True, return_state=True, name='analysis_top')(X_anal)
+        state = [h_anal, c_anal]
 
-    opt = Adam(learning_rate=learning_rate, beta_1 = 0.9, beta_2 = 0.99, epsilon=1e-7, clipnorm=1)
-    model.compile(loss='mse', optimizer=opt, metrics=['mae'])
+        anal_time_steps_squeezed = []
+        anal_time_steps = []
+        scoring = []
+        for j in range(self.anal_size):
+            # anal timesteps are stored separately in the list anal_time_steps_squeezed, using the function get_X_j We
+            # don't need to feed these arrays to a LSTM so there is no need for a temporal dimension so we set
+            # squeeze=False(default)
+            anal_time_steps_squeezed.append(Lambda(self.get_X_j, arguments={'j': j}, name='get-memory-{}'.format(j))(anal))
+            # The Dense layer that will assign an score to each timestep is created and stored in the list scoring
+            scoring.append(Dense(units=1, name='scoring-{}'.format(j)))
+            # Finally we also store anal timesteps in a temporal fashion, to feed the prediction LSTM
+            anal_time_steps.append(Lambda(self.get_X_j, arguments={'j': j, 'squeeze': False}, name='get-x-anal-{}'.format(j))(anal))
 
-    return model.fit(X_train, Y_train, batch_size=batch_size, epochs = epochs, validation_data=(X_dev, Y_dev), shuffle=True)
+        # This variable will be used to perform the scoring
+        last = anal_time_steps_squeezed[-1]
 
+        # The list of predictions is initialized
+        Y_list = []
 
-def plot_loss(fitting):
-    plt.plot(np.array(fitting.history['loss']), color='r')
-    plt.plot(np.array(fitting.history['val_loss']), color='b')
-    plt.show()
+        # A layer used to concatenate two pollen level vectors for the scoring(axis=1 for concatenating features,
+        # not samples)
+        concat_pollen_levels = Concatenate(axis=1, name='concat-for-scoring')
+        # And another Concatenate layer, this time to concatenate all the scores into a single array
+        concat_scores = Concatenate(axis=1)
+        # And finally one to concatenate the output of the prediction LSTM with its context
+        concat_context = Concatenate(axis=1)
 
+        for i in range(self.pred_size):
+            # In each prediction timestep, we prepare the list that saves the score of each analysis timestep output
+            scores_list = []
 
-# - v1.0 val_loss = 3.175 after 400 epochs
-# - v1.1 val_loss = 1.797 after 400 epochs
-#     - Added precipitation data
-# - v1.2 val_loss = 0.716 after 400 epochs
-#     - Added a log kernel to pollen data
-#     
-# - v2.0 val_loss = 1130 after 110 epochs
-#     - Trained with all the data
-# - v2.1 val_loss = 0.57 after 100 epochs
-#     - fixed normalization lol
-# - v3.0 val_loss = 1.51 after 100 epochs
-#     - Added multi-day forecasting
-# - v3.1 val_loss = 1.3 afer 100 epochs, 1.5 in madrid-subiza
-#     - Added one DEEP layer to the LSTM
-# - v3.2 val_loss = 0.69 after 20 epochs
-#     - Removed batching
-# - v4.0 val_loss = 0.4 after epochs
-#     - Added attention
-def print_predictions(model, rows=5):
+            for j in range(self.anal_size):
+                # The previous timestep values are concatenated with the j-th analysis output and fed to the j-th scoring
+                # network to get the attention that the model should pay to that specific analysis timestep. It is
+                # important to know that right know there is a different scoring network for each analysis timestep but
+                # not for every prediction timestep, as they were originally much less. This may change in the future
+                concat = concat_pollen_levels([last, anal_time_steps_squeezed[j]])
+                scores_list.append(scoring[j](concat))
 
-    start_windows = random.randint(0, X_dev.shape[0] - rows*5)
+            # The scores are concatenated into a (m x anal_size) array and fed into a softmax to normalize them
+            scores = concat_scores(scores_list)
+            scores = Softmax(axis=1)(scores)
 
-    f = h5py.File('proc_data.h5', 'r')
-    parameters = f['parameters']
+            # We get the context from the list using our custom GetContext layer
+            context = GetContext()(anal, scores)
 
-    pollen_mean = parameters[0, 2]
-    pollen_std = parameters[0, 2]
+            # We input the meteorological data from the i-th prediction timestep into the prediction LSTM,
+            # with the carried over state from last prediction. If it is the first, the state comes from the analysis LSTM
+            prediction_time_step = Lambda(self.get_X_j, arguments={'j': i, 'squeeze': False}, name='get-x-pred-{}'.format(i))(X_pred)
+            LSTM_out, h, c = LSTM(64, return_state=True, name='prediction-{}'.format(i))(prediction_time_step, initial_state=state)
+            state = [h, c]
 
-    X_pred = np.array(X_dev[start_windows:start_windows+rows*5])
-    Y_pred = np.array(np.array(model(X_pred)))
-    Y_true = np.array(Y_dev[start_windows:start_windows+rows*5])
+            # We concatenate the last prediction of the LSTM with its previously computed context
+            Y_step = concat_context([LSTM_out, context])
 
-    fig = plt.figure(figsize=(12, 12))
+            # Then we feed it to a Dense layer which given the LSTM prediction and the context outputs the final pollen
+            # prediction, and store it in Y_list
+            densor = Dense(units=1, name='densor-{}'.format(i))
+            Y_list.append(densor(Y_step))
 
-    for i in range(rows*5):
-        a = fig.add_subplot(rows, 5, i + 1)
-        a.set_ylim([0, 7])
+            # We then copy the LSTM output to the variable that keeps track of the last prediction to compute scores
+            last = LSTM_out
 
-        a.plot(range(window_size), X_pred[i, :, 2]*pollen_std + pollen_mean, color='b')
-        a.plot(range(anal_size, window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
-        a.plot(range(anal_size, window_size), Y_true[i]*pollen_std + pollen_mean, color='g')
+        # Finally all outputs from Y_list are concatenated into a single array, and marked as the output
+        Y = Concatenate(axis=1)(Y_list)
 
-    plt.show()
+        self.model = Model(inputs=X_in, outputs=Y)
+        self.model.summary()
 
-'''
-start_windows = 20
-end_windows = 40
+    # Train the model with the specified parameters
+    def train(self, learning_rate=0.001, epochs=10, batch_size=128):
 
-X_pred = X_dev_madrid[start_windows:end_windows]
-Y_pred = model(X_pred)
-Y_true = Y_dev_madrid[start_windows:end_windows]
+        opt = Adam(learning_rate=learning_rate, beta_1 = 0.9, beta_2 = 0.99, epsilon=1e-7, clipnorm=1)
+        self.model.compile(loss='mse', optimizer=opt, metrics=['mae'])
 
-for i in range(end_windows - start_windows):
-    plt.plot(range(window_size), X_pred[i, :, 2], color='b')
-    plt.plot(range(anal_size, window_size), Y_pred[i], color='r')
-    plt.plot(range(anal_size, window_size), Y_true[i], color='g')
-    plt.show()
+        self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs = epochs, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
 
-
-parameters = f['parameters']
-pollen_mean = parameters[0, 2]
-pollen_std = parameters[1, 2]
-
-start_pred = 100
-end_pred = 120
-
-Y_true = Y_dev[start_pred:end_pred]
-Y_pred = model(X_dev)[start_pred:end_pred]
-
-for i in range(pred_size):
-    plt.plot(Y_true[:, i], color='b')
-    plt.plot(Y_pred[:, i], color='r')
-
-    plt.show()
-
-
-# Here we plot the data directly as it is, with the log kernel, and in the next cell reverted back to the original values. I pass it through this log kernel because I suspect that it is what I will use when I classify the predictions into a few classes or 'levels' of pollen in air. This is because, a jump in pollen levels of a fixed amount is much more noticeable if it comes from a low value(where the user might jump from no symptoms to light symptoms) that in a already high value where the user will be fucked up either way.
-
-'''
+    # Plots the loss over time of last training
+    def plot_loss(self):
+        plt.plot(np.array(self.fitting.history['loss']), color='r')
+        plt.plot(np.array(self.fitting.history['val_loss']), color='b')
+        plt.show()
 
 
-def save_model(model):
-    model.save('model')
+    # - v1.0 val_loss = 3.175 after 400 epochs
+    # - v1.1 val_loss = 1.797 after 400 epochs
+    #     - Added precipitation data
+    # - v1.2 val_loss = 0.716 after 400 epochs
+    #     - Added a log kernel to pollen data
+    #
+    # - v2.0 val_loss = 1130 after 110 epochs
+    #     - Trained with all the data
+    # - v2.1 val_loss = 0.57 after 100 epochs
+    #     - fixed normalization lol
+    # - v3.0 val_loss = 1.51 after 100 epochs
+    #     - Added multi-day forecasting
+    # - v3.1 val_loss = 1.3 afer 100 epochs, 1.5 in madrid-subiza
+    #     - Added one DEEP layer to the LSTM
+    # - v3.2 val_loss = 0.69 after 20 epochs
+    #     - Removed batching
+    # - v4.0 val_loss = 0.4 after 10 epochs
+    #     - Added attention
+    # - v4.1 val_loss = 0.35 after 3 epochs
+    #     - Fixed bug in prediction LSTM
+    # Prints some examples of predictions against real values
+    def print_predictions(self, rows=5):
 
+        start_windows = random.randint(0, self.X_dev.shape[0] - rows*5)
 
-def get_model():
-    return tf.keras.models.load_model('model')
+        f = h5py.File('proc_data.h5', 'r')
+        parameters = f['parameters']
+
+        pollen_mean = parameters[0, 2]
+        pollen_std = parameters[0, 2]
+
+        X_pred = np.array(self.X_dev[start_windows:start_windows+rows*5])
+        Y_pred = np.array(np.array(self.model(X_pred)))
+        Y_true = np.array(self.Y_dev[start_windows:start_windows+rows*5])
+
+        fig = plt.figure(figsize=(12, 12))
+
+        for i in range(rows*5):
+            a = fig.add_subplot(rows, 5, i + 1)
+            a.set_ylim([0, 7])
+
+            a.plot(range(self.window_size), X_pred[i, :, 2]*pollen_std + pollen_mean, color='b')
+            a.plot(range(self.anal_size, self.window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
+            a.plot(range(self.anal_size, self.window_size), Y_true[i]*pollen_std + pollen_mean, color='g')
+
+        plt.show()
+
+    # Save the model to a file
+    def save(self):
+        self.model.save('model')
+
+    # Load the model from file
+    def load(self):
+        self.model = load_model('model')
 
 
