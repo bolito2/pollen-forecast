@@ -392,7 +392,7 @@ def read_proc_data():
 
     for station in pollen_stations:
         if not station in excluded:
-            proc_data[station] = proc_file[station]
+            proc_data[station] = np.array(proc_file[station])
 
     proc_file.close()
 
