@@ -44,7 +44,7 @@ class GetContext(Layer):
         return tf.reshape(tf.matmul(tf.transpose(anal, perm=[0, 2, 1]), scores_reshaped), [-1, anal.shape[2]])
 
 
-class PoleNN:
+class Polenn:
     def __init__(self):
         # We import all the data, already prepared
         f = h5py.File('proc_data.h5', 'r')
@@ -249,6 +249,6 @@ class PoleNN:
 
     # Load the model from file
     def load(self):
-        self.model = load_model('model')
+        self.model = load_model('model', custom_objects = {'get_X_anal': self.get_X_anal, 'get_X_pred': self.get_X_pred, 'get_X_j': self.get_X_j})
 
 
