@@ -139,6 +139,9 @@ class Polenn:
         # And finally one to concatenate the output of the prediction LSTM with its context
         concat_context = Concatenate(axis=1)
 
+        # This is the LSTM that will predict the intermediate values before applying context
+        pred_LSTM = LSTM(64, return_state=True, name='prediction')
+
         for i in range(self.pred_size):
             # In each prediction timestep, we prepare the list that saves the score of each analysis timestep output
             scores_list = []
@@ -161,7 +164,7 @@ class Polenn:
             # We input the meteorological data from the i-th prediction timestep into the prediction LSTM,
             # with the carried over state from last prediction. If it is the first, the state comes from the analysis LSTM
             prediction_time_step = Lambda(self.get_X_j, arguments={'j': i, 'squeeze': False}, name='get-x-pred-{}'.format(i))(X_pred)
-            LSTM_out, h, c = LSTM(64, return_state=True, name='prediction-{}'.format(i))(prediction_time_step, initial_state=state)
+            LSTM_out, h, c = pred_LSTM(prediction_time_step, initial_state=state)
             state = [h, c]
 
             # We concatenate the last prediction of the LSTM with its previously computed context
@@ -217,9 +220,9 @@ class Polenn:
     # - v4.1 val_loss = 0.35 after 3 epochs
     #     - Fixed bug in prediction LSTM
     # Prints some examples of predictions against real values
-    def print_predictions(self, rows=5):
+    def print_predictions(self, rows=4):
 
-        start_windows = random.randint(0, self.X_dev.shape[0] - rows*5)
+        start_windows = random.randint(0, self.X_dev.shape[0] - rows*4)
 
         f = h5py.File('proc_data.h5', 'r')
         parameters = f['parameters']
@@ -227,14 +230,14 @@ class Polenn:
         pollen_mean = parameters[0, 2]
         pollen_std = parameters[0, 2]
 
-        X_pred = np.array(self.X_dev[start_windows:start_windows+rows*5])
+        X_pred = np.array(self.X_dev[start_windows:start_windows+rows*4])
         Y_pred = np.array(np.array(self.model(X_pred)))
-        Y_true = np.array(self.Y_dev[start_windows:start_windows+rows*5])
+        Y_true = np.array(self.Y_dev[start_windows:start_windows+rows*4])
 
         fig = plt.figure(figsize=(12, 12))
 
-        for i in range(rows*5):
-            a = fig.add_subplot(rows, 5, i + 1)
+        for i in range(rows*4):
+            a = fig.add_subplot(rows, 4, i + 1)
             a.set_ylim([0, 7])
 
             a.plot(range(self.window_size), X_pred[i, :, 2]*pollen_std + pollen_mean, color='b')
