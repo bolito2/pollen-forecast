@@ -29,7 +29,6 @@ class GetContext(Layer):
     def __init__(self):
         super(GetContext, self).__init__()
 
-    # TODO
     def call(self, anal, scores):
         # Inputs:
         #   anal -> (m, anal_size, n) shaped tensor, represents the output of the analysis LSTM
@@ -47,7 +46,7 @@ class GetContext(Layer):
 class Polenn:
     def __init__(self):
         # We import all the data, already prepared
-        f = h5py.File('proc_data.h5', 'r')
+        f = h5py.File('pooled_data.h5', 'r')
 
         self.X_train, self.Y_train, self.X_dev, self.Y_dev, self.X_test, self.Y_test = np.array(f['X_train']), np.array(f['Y_train']), np.array(f['X_dev']), np.array(f['Y_dev']), f['X_test'], f['Y_test']
 
@@ -57,6 +56,7 @@ class Polenn:
         self.m_train = self.X_train.shape[0]
         self.window_size = self.X_train.shape[1]
         self.pred_size = self.Y_train.shape[1]
+
         self.anal_size = self.window_size - self.pred_size
         self.n = self.X_train.shape[2]
 
@@ -198,37 +198,38 @@ class Polenn:
         plt.plot(np.array(self.fitting.history['val_loss']), color='b')
         plt.show()
 
-
-    # - v1.0 val_loss = 3.175 after 400 epochs
-    # - v1.1 val_loss = 1.797 after 400 epochs
-    #     - Added precipitation data
-    # - v1.2 val_loss = 0.716 after 400 epochs
-    #     - Added a log kernel to pollen data
+    # v1.0 val_loss = 3.175 after 400 epochs
+    # v1.1 val_loss = 1.797 after 400 epochs
+    #   - Added precipitation data
+    # v1.2 val_loss = 0.716 after 400 epochs
+    #   - Added a log kernel to pollen data
     #
-    # - v2.0 val_loss = 1130 after 110 epochs
-    #     - Trained with all the data
-    # - v2.1 val_loss = 0.57 after 100 epochs
-    #     - fixed normalization lol
-    # - v3.0 val_loss = 1.51 after 100 epochs
-    #     - Added multi-day forecasting
-    # - v3.1 val_loss = 1.3 afer 100 epochs, 1.5 in madrid-subiza
-    #     - Added one DEEP layer to the LSTM
-    # - v3.2 val_loss = 0.69 after 20 epochs
-    #     - Removed batching
-    # - v4.0 val_loss = 0.4 after 10 epochs
-    #     - Added attention
-    # - v4.1 val_loss = 0.35 after 3 epochs
-    #     - Fixed bug in prediction LSTM
+    # v2.0 val_loss = 1130 after 110 epochs
+    #   - Trained with all the data
+    # v2.1 val_loss = 0.57 after 100 epochs
+    #   - fixed normalization lol
+    # v3.0 val_loss = 1.51 after 100 epochs
+    #   - Added multi-day forecasting
+    # v3.1 val_loss = 1.3 afer 100 epochs, 1.5 in madrid-subiza
+    #   - Added one DEEP layer to the LSTM
+    # v3.2 val_loss = 0.69 after 20 epochs
+    #   - Removed batching
+    # v4.0 val_loss = 0.4 after 10 epochs
+    #   - Added attention
+    # v4.1 val_loss = 0.35 after 3 epochs
+    #   - Fixed bug in prediction LSTM
+    # v4.2 val_loss = 0.31 after 2 epochs
+    #   - improved data handler
+
     # Prints some examples of predictions against real values
     def print_predictions(self, rows=4):
 
         start_windows = random.randint(0, self.X_dev.shape[0] - rows*4)
 
-        f = h5py.File('proc_data.h5', 'r')
-        parameters = f['parameters']
+        f = h5py.File('pooled_data.h5', 'r')
 
-        pollen_mean = parameters[0, 2]
-        pollen_std = parameters[0, 2]
+        pollen_mean = f['mean'][2]
+        pollen_std = f['std'][2]
 
         X_pred = np.array(self.X_dev[start_windows:start_windows+rows*4])
         Y_pred = np.array(np.array(self.model(X_pred)))
