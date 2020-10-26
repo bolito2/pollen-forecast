@@ -420,6 +420,9 @@ class DataHandler:
                 del data_file['Y_dev']
                 del data_file['X_test']
                 del data_file['Y_test']
+
+                del data_file['mean']
+                del data_file['std']
             except KeyError:
                 pass
 
@@ -429,4 +432,7 @@ class DataHandler:
             data_file.create_dataset('Y_dev', data=Y_dev)
             data_file.create_dataset('X_test', data=X_test)
             data_file.create_dataset('Y_test', data=Y_test)
+
+            data_file.create_dataset('mean', data=self.mean)
+            data_file.create_dataset('std', data=self.std)
 
