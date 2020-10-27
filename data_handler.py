@@ -351,13 +351,13 @@ class DataHandler:
         test_set = XY_total[int(XY_total.shape[0] * (train_rate + dev_rate)):, :, :]
 
         X_train = train_set
-        Y_train = train_set[:, metadata.anal_size:window_size, 2]
+        Y_train = train_set[:, metadata.anal_size:window_size, 0]
 
         X_dev = dev_set
-        Y_dev = dev_set[:, metadata.anal_size:window_size, 2]
+        Y_dev = dev_set[:, metadata.anal_size:window_size, 0]
 
         X_test = test_set
-        Y_test = test_set[:, metadata.anal_size:window_size, 2]
+        Y_test = test_set[:, metadata.anal_size:window_size, 0]
 
         return X_train, Y_train, X_dev, Y_dev, X_test, Y_test
 
