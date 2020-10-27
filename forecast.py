@@ -71,7 +71,7 @@ class Polenn:
 
         f.close()
 
-        self.model = 'not loaded'
+        self.model = None
         self.fitting = []
 
     # --- METHODS TO BUILD MODEL ---
@@ -82,12 +82,9 @@ class Polenn:
         X_anal = X_in[:, :self.anal_size, :]
         return X_anal
 
+    # Exclude the pollen data from the prediction part, else we are not really predicting anything xd
     def get_X_pred(self, X_in):
-        X_before_pollen = X_in[:, self.anal_size:self.window_size, :2]
-        X_after_pollen = X_in[:, self.anal_size:self.window_size, 3:]
-
-        X_pred = tf.concat([X_before_pollen, X_after_pollen], axis=2)
-
+        X_pred = X_in[:, :self.anal_size, 1:]
         return X_pred
 
     # We get a single time point from a window
@@ -220,16 +217,16 @@ class Polenn:
     #   - Fixed bug in prediction LSTM
     # v4.2 val_loss = 0.31 after 2 epochs
     #   - improved data handler
-
+    # v4.3 val_loss = 0.4 after 4 epochs
+    #   - Added more cycles, removed altitude uwu
     # Prints some examples of predictions against real values
     def print_predictions(self, rows=4):
-
         start_windows = random.randint(0, self.X_dev.shape[0] - rows*4)
 
         f = h5py.File('pooled_data.h5', 'r')
 
-        pollen_mean = f['mean'][2]
-        pollen_std = f['std'][2]
+        pollen_mean = f['mean'][0]
+        pollen_std = f['std'][0]
 
         X_pred = np.array(self.X_dev[start_windows:start_windows+rows*4])
         Y_pred = np.array(np.array(self.model(X_pred)))
@@ -241,7 +238,7 @@ class Polenn:
             a = fig.add_subplot(rows, 4, i + 1)
             a.set_ylim([0, 7])
 
-            a.plot(range(self.window_size), X_pred[i, :, 2]*pollen_std + pollen_mean, color='b')
+            a.plot(range(self.window_size), X_pred[i, :, 0]*pollen_std + pollen_mean, color='b')
             a.plot(range(self.anal_size, self.window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
             a.plot(range(self.anal_size, self.window_size), Y_true[i]*pollen_std + pollen_mean, color='g')
 
@@ -256,3 +253,6 @@ class Polenn:
         self.model = load_model('model', custom_objects = {'get_X_anal': self.get_X_anal, 'get_X_pred': self.get_X_pred, 'get_X_j': self.get_X_j})
 
 
+# Create the class automatically if running from main
+if __name__ == '__main__':
+    model = Polenn()
