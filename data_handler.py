@@ -399,6 +399,8 @@ class DataHandler:
 
     # Read the pooled data from file
     def read_pooled_data(self):
+        self.pooled_data = dict()   # Reset pooled_data
+
         with h5py.File(metadata.data_handler_filename, 'r') as data_file:
             for station in metadata.pollen_stations:
                 if station in data_file.keys():
@@ -410,6 +412,7 @@ class DataHandler:
     # Feature data needs to be normalized while the cycle data is untouched
     def normalize_data(self):
         self.mean, self.std = DataHandler.compute_mean_std(self.pooled_data)
+        self.norm_data = dict()     # Reset norm_data
 
         for station in self.pooled_data.keys():
             self.norm_data[station] = np.zeros(self.pooled_data[station].shape)
