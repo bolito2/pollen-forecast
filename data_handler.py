@@ -2,6 +2,7 @@
 # coding: utf-8
 
 # Import dependencies
+import os
 
 import h5py
 import matplotlib.pyplot as plt
@@ -367,6 +368,7 @@ class DataHandler:
     # and deleting the holes. After that verify that everything is correct, process the data and add it to the
     # pooled_data dictionary in the corresponding station
     def build_pooled_data(self, start='albacete'):
+        self.pooled_data = dict()
         start_index = metadata.pollen_stations.index(start)
 
         for station in metadata.pollen_stations[start_index:]:
@@ -390,22 +392,17 @@ class DataHandler:
 
     # Save the pooled data into a file
     def save_pooled_data(self):
-        with h5py.File('pooled_data.h5', 'a') as data_file:
+        os.remove(metadata.data_handler_filename)
+        with h5py.File(metadata.data_handler_filename, 'w') as data_file:
             for station in self.pooled_data.keys():
-                try:
-                    del data_file[station]
-                except KeyError:
-                    pass
                 data_file.create_dataset(station, data=self.pooled_data[station])
 
     # Read the pooled data from file
     def read_pooled_data(self):
-        with h5py.File('pooled_data.h5', 'a') as data_file:
+        with h5py.File(metadata.data_handler_filename, 'r') as data_file:
             for station in metadata.pollen_stations:
-                try:
+                if station in data_file.keys():
                     self.pooled_data[station] = np.array(data_file[station])
-                except KeyError:
-                    pass
 
     # <<< POST-PROCESSING POOLED DATA >>>
 
@@ -427,7 +424,7 @@ class DataHandler:
     # save the train/dev/test sets into the dataset, ready to feed them to the model
     # TODO: Avoid having holes inside windows
     def save_train_data(self, train_rate=0.85, dev_rate=0.1):
-        with h5py.File('pooled_data.h5', 'a') as data_file:
+        with h5py.File(metadata.data_handler_filename, 'w') as data_file:
             XY_total = np.zeros((0, metadata.window_size, metadata.n))
 
             self.normalize_data()
@@ -437,18 +434,7 @@ class DataHandler:
 
             X_train, Y_train, X_dev, Y_dev, X_test, Y_test = DataHandler.split_data(XY_total, train_rate, dev_rate)
 
-            try:
-                del data_file['X_train']
-                del data_file['Y_train']
-                del data_file['X_dev']
-                del data_file['Y_dev']
-                del data_file['X_test']
-                del data_file['Y_test']
-
-                del data_file['mean']
-                del data_file['std']
-            except KeyError:
-                pass
+            print('X_train.shape is', X_train.shape)
 
             data_file.create_dataset('X_train', data=X_train)
             data_file.create_dataset('Y_train', data=Y_train)

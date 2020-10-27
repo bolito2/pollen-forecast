@@ -1,3 +1,5 @@
+# filename for the data_handler output
+data_handler_filename = 'pooled_data.h5'
 
 # Station excluded from the model for errors or lack of data:
 excluded = ['guadalajara', 'pontevedra', 'santiago-compostela']
