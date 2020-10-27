@@ -13,7 +13,7 @@ import math
 import time
 
 # Metadata for getting AEMET data and other things
-from metadata import *
+import metadata
 
 
 # Class for reading and processing the data
@@ -81,8 +81,8 @@ class DataHandler:
     # It returns the weather data from station in the period fechaini-fechafin (maximum of 5 years)
     @staticmethod
     def get_aemet_batch(fechaini, fechafin, station):
-        url = aemet_url.format(fechaini, fechafin, station)
-        querystring = {"api_key": api_key}  # The API key and AEMET_url are obtained from metadata.py
+        url = metadata.aemet_url.format(fechaini, fechafin, station)
+        querystring = {"api_key": metadata.api_key}  # The API key and AEMET_url are obtained from metadata.py
 
         # Avoid problems with getting the same data twice
         headers = {
@@ -125,7 +125,7 @@ class DataHandler:
                 fechafin = datetime.strftime(loop_date, '%Y-%m-%d') + 'T23:59:59UTC'
 
             # Finally append the batch of data to weather_data
-            weather_data = weather_data + DataHandler.get_aemet_batch(fechaini, fechafin, weather_stations[station])
+            weather_data = weather_data + DataHandler.get_aemet_batch(fechaini, fechafin, metadata.weather_stations[station])
 
         return weather_data
 
@@ -221,14 +221,14 @@ class DataHandler:
     @staticmethod
     def process_data(pollen_data, weather_data):
         m = len(weather_data)
-        proc_data = np.zeros((m, n), dtype=np.float32)
+        proc_data = np.zeros((m, metadata.n), dtype=np.float32)
 
         proc_data[:, :2] = DataHandler.get_year_position(pollen_data[:, 0])
         proc_data[:, 2] = np.log(pollen_data[:, 1] + 1)
 
         beta = 0.9
-        exp_means = np.zeros(n)
-        holes = np.zeros(n, dtype=np.int32)
+        exp_means = np.zeros(metadata.n)
+        holes = np.zeros(metadata.n, dtype=np.int32)
 
         straight_data_index = 5
 
@@ -253,10 +253,10 @@ class DataHandler:
                 holes[straight_data_index - 1] += 1
 
             #We start at 3 because we compute wind direction components separately
-            for j in range(straight_data_index, n):
-                if features[j] in weather_data[i]:
+            for j in range(straight_data_index, metadata.n):
+                if metadata.features[j] in weather_data[i]:
                     try:
-                        proc_data[i, j] = float(weather_data[i][features[j]].replace(',', '.'))
+                        proc_data[i, j] = float(weather_data[i][metadata.features[j]].replace(',', '.'))
                         exp_means[j] = beta*exp_means[j] + (1 - beta)*proc_data[i, j]
                     except:
                         print('exception')
@@ -266,9 +266,9 @@ class DataHandler:
                     proc_data[i, j] = exp_means[j]/(1-beta**(i + 1))
                     holes[j] += 1
 
-            for j in range(n):
+            for j in range(metadata.n):
                 if np.isnan(proc_data[i, j]):
-                    print(i, features[j])
+                    print(i, metadata.features[j])
                     print('NaN')
                     proc_data[i, j] = 0
 
@@ -279,15 +279,15 @@ class DataHandler:
     # Get mean and std for the whole set of data, that is, joining all stations
     @staticmethod
     def compute_mean_std(data):
-        mean = np.zeros(n - 1)
-        var = np.zeros(n - 1)
+        mean = np.zeros(metadata.n - 1)
+        var = np.zeros(metadata.n - 1)
         data_count = 0
 
         for station in data.keys():
             local_count = data[station].shape[0]
             data_count += local_count
 
-            for j in range(n - 1):
+            for j in range(metadata.n - 1):
                 mean[j] += data[station][:, j].mean() * local_count
                 # in-group variance
                 var[j] += data[station][:, j].var() * local_count
@@ -298,7 +298,7 @@ class DataHandler:
             local_count = data[station].shape[0]
 
             # Outside-variance
-            for j in range(n - 1):
+            for j in range(metadata.n - 1):
                 var[j] += local_count * (data[station][:, j].mean() - mean[j]) ** 2
 
         var /= data_count
@@ -347,10 +347,10 @@ class DataHandler:
     # and deleting the holes. After that verify that everything is correct, process the data and add it to the
     # pooled_data dictionary in the corresponding station
     def build_pooled_data(self, start='albacete'):
-        startIndex = pollen_stations.index(start)
+        startIndex = metadata.pollen_stations.index(start)
 
-        for station in pollen_stations[startIndex:]:
-            if not station in excluded:
+        for station in metadata.pollen_stations[startIndex:]:
+            if not station in metadata.excluded:
                 pollen_data = self.get_pollen_data(station)
                 start_date, end_date = DataHandler.get_date_range(pollen_data)
 
@@ -381,7 +381,7 @@ class DataHandler:
     # Read the pooled data from file
     def read_pooled_data(self):
         with h5py.File('pooled_data.h5', 'a') as data_file:
-            for station in pollen_stations:
+            for station in metadata.pollen_stations:
                 try:
                     self.pooled_data[station] = np.array(data_file[station])
                 except KeyError:
@@ -395,7 +395,7 @@ class DataHandler:
 
         for station in self.pooled_data.keys():
             self.norm_data[station] = np.zeros(self.pooled_data[station].shape)
-            for j in range(n - 1):
+            for j in range(metadata.n - 1):
                 self.norm_data[station][:, j] = (self.pooled_data[station][:, j] - self.mean[j])/self.std[j]
 
     # Normalize data, split it into windows, then split those into analysis and prediction time-steps and finally
@@ -404,7 +404,7 @@ class DataHandler:
     def save_train_data(self, anal_size, pred_size, train_rate=0.85, dev_rate=0.1):
         with h5py.File('pooled_data.h5', 'a') as data_file:
             window_size = anal_size + pred_size
-            XY_total = np.zeros((0, window_size, n))
+            XY_total = np.zeros((0, window_size, metadata.n))
 
             self.normalize_data()
 
