@@ -80,7 +80,7 @@ class Client(object):
 
                         print('scraping from', self.stations[self.s])
 
-                        stringmsg = '{{"msg":"sub","id":"die7LBp7mEbzW3ffQ","name":"polenes2015","params":[{{"selector":{{"$and":[{{"fecha":{{"$gte":19700101,"$lte":20201231}}}},{{"idEstacion":{}}}]}},"options":{{"sort":{{"fecha":1}}}},"jump":1}}]}}'.format(self.ids[self.s]);
+                        stringmsg = '{{"msg":"sub","id":"die7LBp7mEbzW3ffQ","name":"polenes2015","features":[{{"selector":{{"$and":[{{"fecha":{{"$gte":19700101,"$lte":20201231}}}},{{"idEstacion":{}}}]}},"options":{{"sort":{{"fecha":1}}}},"jump":1}}]}}'.format(self.ids[self.s]);
                         #print(stringmsg)
                         msg = json.dumps([stringmsg])
                         self.ws.write_message(msg.encode('utf8'));
@@ -111,7 +111,7 @@ class Client(object):
 
                             print('scraping from', self.stations[self.s])
 
-                            stringmsg = '{{"msg":"sub","id":"die7LBp7mEbzW3ffQ","name":"polenes2015","params":[{{"selector":{{"$and":[{{"fecha":{{"$gte":19700101,"$lte":20201231}}}},{{"idEstacion":{}}}]}},"options":{{"sort":{{"fecha":1}}}},"jump":1}}]}}'.format(self.ids[self.s]);
+                            stringmsg = '{{"msg":"sub","id":"die7LBp7mEbzW3ffQ","name":"polenes2015","features":[{{"selector":{{"$and":[{{"fecha":{{"$gte":19700101,"$lte":20201231}}}},{{"idEstacion":{}}}]}},"options":{{"sort":{{"fecha":1}}}},"jump":1}}]}}'.format(self.ids[self.s]);
                             #print(stringmsg)
                             msg = json.dumps([stringmsg])
                             self.ws.write_message(msg.encode('utf8'));

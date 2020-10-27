@@ -46,6 +46,19 @@ api_key = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJib2xpdG8yaGRAZ21haWwuY29tIiwianRpIjoi
           "zE2NzVmMjE0IiwiaXNzIjoiQUVNRVQiLCJpYXQiOjE2MDE2NTY1NzQsInVzZXJJZCI6IjI1Mjk2NzA0LWQ2M2UtNGY5Ni1hNzU5LWE2ODM" \
           "xNjc1ZjIxNCIsInJvbGUiOiIifQ.KzMsubyf4Ux1jxAgu5cGKGZ7rUaGYUreYu8AR0isWjM"
 
-# Features of the model
-features = ['time_sin', 'time_cos', 'pollen', 'dx', 'dy', 'tmax', 'tmed', 'tmin', 'presMax', 'presMin', 'velmedia', 'racha', 'prec', 'altitud']
-n = len(features)
+# Days in the analysis phase
+anal_size = 30
+# Days in the prediction phase
+pred_size = 10
+# Total temporal span of the model
+window_size = anal_size + pred_size
+
+# Features of the model(day to day data)
+features = ['pollen', 'tmax', 'tmed', 'tmin', 'presMax', 'presMin', 'velmedia', 'racha', 'prec', 'dx', 'dy']
+n_features = len(features)
+# Time cycles relevant in pollen levels evolution. According to (Nowosad et al. 2015) the most important temporal spans
+# are 1 day, 3.5 days and more than 15 days so we will use the analysis size, and then obviously the year(365)
+cycles = [365, anal_size, 4]
+n_cycles = len(cycles)
+
+n = n_features + 2*n_cycles

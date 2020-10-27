@@ -6,7 +6,7 @@
 import h5py
 import matplotlib.pyplot as plt
 import requests
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import math
@@ -176,24 +176,31 @@ class DataHandler:
 
         return False, -1
 
-    # Transform the day of the year to a sinusoidal wave, to account for season differences in a periodic way(0 = 365)
+    # Create sinusoidal waves of the period specified returned as an array of m elements
+    # TODO: Check the impact of leap years
     @staticmethod
-    def get_year_position(pollen_dates):
-        m = pollen_dates.shape[0]
-        year_position = np.zeros((m, 2))
+    def get_temporal_cycle(m, period):
+        cycle = np.zeros((2, m))    # Initialize the cycles
 
-        for i in range(m):
-            day_of_year = float(DataHandler.integer_to_date(pollen_dates[i]).strftime('%j'))
-            year_position[i][0] = math.cos(day_of_year*2*math.pi/365)
-            year_position[i][1] = math.sin(day_of_year*2*math.pi/365)
-        return year_position
+        # Compute a periodic repetition of the saw sequence {0, 1, 2, ..., period - 1}
+        saw_sequence = np.mod(range(m), period)
+
+        # Then compute the sin and cos of the sequence scaled to go from 0 to 2pi.
+        # This way we get complete repeating cycles of the specified period
+        cycle[0] = np.cos(saw_sequence * 2 * np.pi / period)
+        cycle[1] = np.sin(saw_sequence * 2 * np.pi / period)
+        return np.transpose(cycle)  # The data must be of shape (m, 2) to fit in the keras model
 
     # Format the data into a np.array to feed the RNN
-    # n is the number of features, in our case:
+    # n is the number of features, divided in three categories:
 
-    # Sin-wave of the day of the year
-    # Cos-wave of the day of the year
+    # TEMPORAL SPAN DATA
+    # Sinusoidal waves of the temporal spans of various factors that influence pollen levels
+    # According to (Nowosad et al. 2015) the most important temporal spans are 1 day, 3.5 days and more than 15 days
+    # so we will use the analysis size, and then obviously the year(365)
 
+    # FEATURE DATA
+    # The main data, consisting in pollen and weather data sampled daily. It will be normalized
     # Pollen level
         # Here I compute the final data as $z = log(x + 1)$. I pass it through this log kernel because I suspect that it
         # is what I will use when I classify the predictions into a few classes or 'levels' of pollen in air. This is
@@ -214,80 +221,93 @@ class DataHandler:
         # I noticed that the parameter of direction is in TENS of degrees, so we have to multiply it by ten. Oh,
         # and I forgot to change it to radians so it was basically useless xd
 
+    # TODO: Add location specific parameters(longitude-latitude-altitude) preferably once per sample(maybe in another function)
+
     # Guess what, the weather data also has holes! And in each category separately!
     # To combat this we will compute exponentially weighted means to use when some parameter is not known
-
-    # TODO: Improve this shit
     @staticmethod
     def process_data(pollen_data, weather_data):
-        m = len(weather_data)
-        proc_data = np.zeros((m, metadata.n), dtype=np.float32)
+        m = len(weather_data)   # Sample size
 
-        proc_data[:, :2] = DataHandler.get_year_position(pollen_data[:, 0])
-        proc_data[:, 2] = np.log(pollen_data[:, 1] + 1)
+        # Initialize feature data
+        feature_data = np.zeros((m, metadata.n_features), dtype=np.float32)
 
+        # The first row is pollen, with a log kernel(temporal)
+        feature_data[:, 0] = np.log(pollen_data[:, 1] + 1)
+
+        # Initialize the parameters for the exp-weighted mean
         beta = 0.9
-        exp_means = np.zeros(metadata.n)
-        holes = np.zeros(metadata.n, dtype=np.int32)
+        exp_means = np.zeros(metadata.n_features)
 
-        straight_data_index = 5
+        # This variable will hold the angle of the wind direction vector if it exists, and be equal to None otherwise
+        angle = None
 
+        # Iterate through the dataset
         for i in range(m):
+            # Always make sure that each feature is present in any given day
             if 'prec' in weather_data[i]:
-                #print(weather_data[i]['prec'])
+                # If the precipitation is Ip it means less than 0.1mm so change it to 0.1 to differentiate from 0,0
                 if weather_data[i]['prec'] == 'Ip':
-                    weather_data[i]['prec'] = '0,0'
+                    weather_data[i]['prec'] = '0,1'
+
+
+            # If the direction of the wind is present, change it from tens of degrees(who the fuck uses that unit) to radians
             if 'dir' in weather_data[i]:
                 angle = float(weather_data[i]['dir'].replace(',', '.'))*math.pi/18
-
-                proc_data[i, straight_data_index - 2] = math.cos(angle)
-                proc_data[i, straight_data_index - 1] = math.sin(angle)
-
-                exp_means[straight_data_index - 2] = beta*exp_means[straight_data_index - 2] + (1 - beta)*math.cos(angle)
-                exp_means[straight_data_index - 1] = beta*exp_means[straight_data_index - 1] + (1 - beta)*math.sin(angle)
             else:
-                proc_data[i, straight_data_index - 2] = exp_means[straight_data_index - 2]/(1-beta**(i + 1))
-                proc_data[i, straight_data_index - 1] = exp_means[straight_data_index - 1]/(1-beta**(i + 1))
+                angle = None
 
-                holes[straight_data_index - 2] += 1
-                holes[straight_data_index - 1] += 1
+            # Now iterate through all the features except pollen(the first one)
+            # If any specific feature is missing, replace it with its exp-weighted mean, which is updated if it exists
+            # Bias correction is applied to the exp-weighted means
+            for j in range(1, metadata.n_features):
+                # dx and dy are special features, derived from the angle of the wind speed.
+                if metadata.features[j] == 'dx':
+                    if angle is None:
+                        feature_data[i, j] = exp_means[j]/(1-beta**(i + 1))
+                    else:
+                        feature_data[i, j] = np.cos(angle)
+                        exp_means[j] = beta * exp_means[j] + (1 - beta) * feature_data[i, j]
+                elif metadata.features[j] == 'dy':
+                    if angle is None:
+                        feature_data[i, j] = exp_means[j]/(1-beta**(i + 1))
+                    else:
+                        feature_data[i, j] = np.sin(angle)
+                        exp_means[j] = beta * exp_means[j] + (1 - beta) * feature_data[i, j]
 
-            #We start at 3 because we compute wind direction components separately
-            for j in range(straight_data_index, metadata.n):
-                if metadata.features[j] in weather_data[i]:
+                # For the rest of the features the data is obtained directly, but always checking that it is present
+                elif metadata.features[j] in weather_data[i]:
+                    # Sometimes the data isn't numeric so we just act as if it didn't exist
                     try:
-                        proc_data[i, j] = float(weather_data[i][metadata.features[j]].replace(',', '.'))
-                        exp_means[j] = beta*exp_means[j] + (1 - beta)*proc_data[i, j]
-                    except:
-                        print('exception')
-                        proc_data[i, j] = exp_means[j]/(1-beta**(i + 1))
-                        holes[j] += 1
+                        feature_data[i, j] = float(weather_data[i][metadata.features[j]].replace(',', '.'))
+                        exp_means[j] = beta*exp_means[j] + (1 - beta)*feature_data[i, j]
+                    except ValueError:
+                        feature_data[i, j] = exp_means[j]/(1-beta**(i + 1))
                 else:
-                    proc_data[i, j] = exp_means[j]/(1-beta**(i + 1))
-                    holes[j] += 1
+                    feature_data[i, j] = exp_means[j]/(1-beta**(i + 1))
 
-            for j in range(metadata.n):
-                if np.isnan(proc_data[i, j]):
-                    print(i, metadata.features[j])
-                    print('NaN')
-                    proc_data[i, j] = 0
+        # Initialize cyclic data
+        cycle_data = np.zeros((m, metadata.n_cycles*2), dtype=np.float32)
 
-        print('holes in each parameter:', holes)
-        print('-----------------------------------')
-        return proc_data
+        # Save the cyclic data, sin and cos are generated at the same time
+        for cycle in range(metadata.n_cycles):
+            cycle_data[:, (2 * cycle):(2 * (cycle + 1))] = DataHandler.get_temporal_cycle(m, metadata.cycles[cycle])
 
-    # Get mean and std for the whole set of data, that is, joining all stations
+        # Concatenate the cycle and feature data and return it
+        return np.concatenate((feature_data, cycle_data), axis=1)
+
+    # Get mean and std for the whole set of features, that is, joining all stations. Cycles are ignored
     @staticmethod
     def compute_mean_std(data):
-        mean = np.zeros(metadata.n - 1)
-        var = np.zeros(metadata.n - 1)
+        mean = np.zeros(metadata.n_features)
+        var = np.zeros(metadata.n_features)
         data_count = 0
 
         for station in data.keys():
             local_count = data[station].shape[0]
             data_count += local_count
 
-            for j in range(metadata.n - 1):
+            for j in range(metadata.n_features):
                 mean[j] += data[station][:, j].mean() * local_count
                 # in-group variance
                 var[j] += data[station][:, j].var() * local_count
@@ -298,7 +318,7 @@ class DataHandler:
             local_count = data[station].shape[0]
 
             # Outside-variance
-            for j in range(metadata.n - 1):
+            for j in range(metadata.n_features):
                 var[j] += local_count * (data[station][:, j].mean() - mean[j]) ** 2
 
         var /= data_count
@@ -309,19 +329,19 @@ class DataHandler:
     # Split the data in windows of analysis_size + prediction_size, where the RNN will analyze the first
     # analysis_size days to predict pollen levels in the last prediction_size days
     @staticmethod
-    def sliding_windows(data, window_size):
-        windows = np.zeros((data.shape[0] - window_size + 1, window_size, data.shape[1]))
+    def sliding_windows(data):
+        windows = np.zeros((data.shape[0] - metadata.window_size + 1, metadata.window_size, data.shape[1]))
 
-        for i in range(data.shape[0] - window_size + 1):
-            windows[i] = data[i:i+window_size]
+        for i in range(data.shape[0] - metadata.window_size + 1):
+            windows[i] = data[i:i+metadata.window_size]
 
         return windows
 
     # Split the windowed data into X and Y of size analysis_size and prediction_size and shuffle them
     # Then, split into train/dev/test sets
     @staticmethod
-    def split_data(XY_total, analysis_size, prediction_size, train_rate, dev_rate):
-        window_size = analysis_size + prediction_size
+    def split_data(XY_total, train_rate, dev_rate):
+        window_size = metadata.anal_size + metadata.pred_size
 
         np.random.shuffle(XY_total)
 
@@ -330,13 +350,13 @@ class DataHandler:
         test_set = XY_total[int(XY_total.shape[0] * (train_rate + dev_rate)):, :, :]
 
         X_train = train_set
-        Y_train = train_set[:, analysis_size:window_size, 2]
+        Y_train = train_set[:, metadata.anal_size:window_size, 2]
 
         X_dev = dev_set
-        Y_dev = dev_set[:, analysis_size:window_size, 2]
+        Y_dev = dev_set[:, metadata.anal_size:window_size, 2]
 
         X_test = test_set
-        Y_test = test_set[:, analysis_size:window_size, 2]
+        Y_test = test_set[:, metadata.anal_size:window_size, 2]
 
         return X_train, Y_train, X_dev, Y_dev, X_test, Y_test
 
@@ -347,10 +367,10 @@ class DataHandler:
     # and deleting the holes. After that verify that everything is correct, process the data and add it to the
     # pooled_data dictionary in the corresponding station
     def build_pooled_data(self, start='albacete'):
-        startIndex = metadata.pollen_stations.index(start)
+        start_index = metadata.pollen_stations.index(start)
 
-        for station in metadata.pollen_stations[startIndex:]:
-            if not station in metadata.excluded:
+        for station in metadata.pollen_stations[start_index:]:
+            if station not in metadata.excluded:
                 pollen_data = self.get_pollen_data(station)
                 start_date, end_date = DataHandler.get_date_range(pollen_data)
 
@@ -390,28 +410,32 @@ class DataHandler:
     # <<< POST-PROCESSING POOLED DATA >>>
 
     # Normalize data with the mean and std computed by the above method
+    # Feature data needs to be normalized while the cycle data is untouched
     def normalize_data(self):
         self.mean, self.std = DataHandler.compute_mean_std(self.pooled_data)
 
         for station in self.pooled_data.keys():
             self.norm_data[station] = np.zeros(self.pooled_data[station].shape)
-            for j in range(metadata.n - 1):
+
+            # Feature data
+            for j in range(metadata.n_features):
                 self.norm_data[station][:, j] = (self.pooled_data[station][:, j] - self.mean[j])/self.std[j]
+            # Cycle data
+            self.norm_data[station][:, metadata.n_features:metadata.n] = self.pooled_data[station][:, metadata.n_features:metadata.n]
 
     # Normalize data, split it into windows, then split those into analysis and prediction time-steps and finally
     # save the train/dev/test sets into the dataset, ready to feed them to the model
     # TODO: Avoid having holes inside windows
-    def save_train_data(self, anal_size, pred_size, train_rate=0.85, dev_rate=0.1):
+    def save_train_data(self, train_rate=0.85, dev_rate=0.1):
         with h5py.File('pooled_data.h5', 'a') as data_file:
-            window_size = anal_size + pred_size
-            XY_total = np.zeros((0, window_size, metadata.n))
+            XY_total = np.zeros((0, metadata.window_size, metadata.n))
 
             self.normalize_data()
 
             for station in self.norm_data.keys():
-                XY_total = np.append(XY_total, DataHandler.sliding_windows(self.norm_data[station], window_size), axis=0)
+                XY_total = np.append(XY_total, DataHandler.sliding_windows(self.norm_data[station]), axis=0)
 
-            X_train, Y_train, X_dev, Y_dev, X_test, Y_test = DataHandler.split_data(XY_total, anal_size, window_size, train_rate, dev_rate)
+            X_train, Y_train, X_dev, Y_dev, X_test, Y_test = DataHandler.split_data(XY_total, train_rate, dev_rate)
 
             try:
                 del data_file['X_train']
@@ -436,3 +460,7 @@ class DataHandler:
             data_file.create_dataset('mean', data=self.mean)
             data_file.create_dataset('std', data=self.std)
 
+
+# Create the class automatically if running from main
+if __name__ == '__main__':
+    datahandler = DataHandler()
