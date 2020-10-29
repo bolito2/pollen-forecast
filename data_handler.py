@@ -25,8 +25,11 @@ class DataHandler:
         self.pooled_data = dict()
         self.norm_data = dict()
 
+        self.coordinates = None
+
         self.mean = None
         self.std = None
+        self.max_altitude = -1
 
     # <<< STATIC UTILITY METHODS >>>
 
@@ -433,7 +436,7 @@ class DataHandler:
         self.pooled_data = dict()
         start_index = metadata.pollen_stations.index(start)
 
-        coordinates = self.get_aemet_stations_info()  # Get the coordinates of every station
+        self.coordinates = self.get_aemet_stations_info()  # Get the coordinates of every station
 
         for station in metadata.pollen_stations[start_index:]:
             if station not in metadata.excluded:
@@ -451,7 +454,7 @@ class DataHandler:
                     else:
                         raise Exception("Length of weather_data and pollen_data is not the same")
 
-                self.pooled_data[station] = DataHandler.process_data(pollen_data, weather_data, coordinates[station])
+                self.pooled_data[station] = DataHandler.process_data(pollen_data, weather_data, self.coordinates[station])
 
     # <<< I/O POOLED DATA >>>
 
@@ -473,11 +476,21 @@ class DataHandler:
 
     # <<< POST-PROCESSING POOLED DATA >>>
 
-    # Normalize data with the mean and std comnot puted by the above method
+    # Get the maximum altitude of all stations
+    def get_max_altitude(self):
+        self.max_altitude = -1
+
+        for station in metadata.pollen_stations:
+            if station not in metadata.excluded:
+                if self.coordinates and self.coordinates[station][-1] > self.max_altitude:
+                    self.max_altitude = self.coordinates[station][-1]
+
+    # Normalize data with the mean and std computed by the above method
     # Feature data needs to be normalized while the cycle data is untouched
     def normalize_data(self):
         self.mean, self.std = DataHandler.compute_mean_std(self.pooled_data)
         self.norm_data = dict()  # Reset norm_data
+        self.get_max_altitude()  # Get max altitude and store it in class variable
 
         for station in self.pooled_data.keys():
             self.norm_data[station] = np.zeros(self.pooled_data[station].shape)
@@ -485,9 +498,11 @@ class DataHandler:
             # Feature data
             for j in range(metadata.n_features):
                 self.norm_data[station][:, j] = (self.pooled_data[station][:, j] - self.mean[j]) / self.std[j]
-            # Cycle data
+            # Rest of the data
             self.norm_data[station][:, metadata.n_features:metadata.n] = self.pooled_data[station][:,
                                                                          metadata.n_features:metadata.n]
+            # Also divide the altitudes by the maximum of all stations, so they are in the (0, 1) range
+            self.norm_data[station][:, metadata.n_features + metadata.n_coordinates - 1] /= self.max_altitude
 
     # Normalize data, split it into windows, then split those into analysis and prediction time-steps and finally
     # save the train/dev/test sets into the dataset, ready to feed them to the model
