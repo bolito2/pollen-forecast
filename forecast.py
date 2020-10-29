@@ -236,7 +236,7 @@ class Polenn:
 
         for i in range(rows*4):
             a = fig.add_subplot(rows, 4, i + 1)
-            a.set_ylim([0, 7])
+            a.set_ylim([0, 20])
 
             a.plot(range(self.window_size), X_pred[i, :, 0]*pollen_std + pollen_mean, color='b')
             a.plot(range(self.anal_size, self.window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
@@ -250,7 +250,7 @@ class Polenn:
 
     # Load the model from file
     def load(self):
-        self.model = load_model('model', custom_objects = {'get_X_anal': self.get_X_anal, 'get_X_pred': self.get_X_pred, 'get_X_j': self.get_X_j})
+        self.model = load_model('model', custom_objects={'get_X_anal': self.get_X_anal, 'get_X_pred': self.get_X_pred, 'get_X_j': self.get_X_j})
 
 
 # Create the class automatically if running from main

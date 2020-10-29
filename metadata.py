@@ -40,8 +40,11 @@ weather_stations = {'albacete': '8178D', 'alcazar':'4121', 'alicante': '8025', '
                    'torrelavega': '1109', 'tudela': '9434', 'valencia': '8416', 'valladolid': '2422',
                    'vitoria': '9091O', 'zamora': '2614', 'zaragoza': '9434'}
 
-# URL of the AEMET API
-aemet_url = "https://opendata.aemet.es/opendata/api/valores/climatologicos/diarios/datos/fechaini/{}/fechafin/{}/estacion/{}"
+# URLs of the AEMET API
+# Gets weather data from a given station
+aemet_data_url = "https://opendata.aemet.es/opendata/api/valores/climatologicos/diarios/datos/fechaini/{}/fechafin/{}/estacion/{}"
+# Gets info about all stations(coordinates)
+aemet_stations_url = 'https://opendata.aemet.es/opendata/api/valores/climatologicos/inventarioestaciones/todasestaciones'
 
 # API key for accessing the AEMET API. This should probably be private lol
 api_key = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJib2xpdG8yaGRAZ21haWwuY29tIiwianRpIjoiMjUyOTY3MDQtZDYzZS00Zjk2LWE3NTktYTY4M" \
@@ -63,4 +66,7 @@ n_features = len(features)
 cycles = [365, anal_size, 4]
 n_cycles = len(cycles)
 
-n = n_features + 2*n_cycles
+# The coordinates of each station uses 5 numbers(2 for longitude and latitude, 1 for altitude)
+n_coordinates = 5
+
+n = n_features + 2*n_cycles + n_coordinates
