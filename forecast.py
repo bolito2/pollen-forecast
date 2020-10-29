@@ -10,13 +10,15 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Lambda, Concatenate, Softmax, Layer
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, SGD
 
 from tensorflow.keras.models import load_model
 
 import random
+import os
 
-tf.get_logger().setLevel('INFO')
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Let's check that the GPU is detected
 
@@ -187,7 +189,7 @@ class Polenn:
         opt = Adam(learning_rate=learning_rate, beta_1 = 0.9, beta_2 = 0.99, epsilon=1e-7, clipnorm=1)
         self.model.compile(loss='mse', optimizer=opt, metrics=['mae'])
 
-        self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs = epochs, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
+        self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs=epochs, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
 
     # Plots the loss over time of last training
     def plot_loss(self):
