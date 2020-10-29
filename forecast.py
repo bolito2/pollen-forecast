@@ -16,7 +16,7 @@ from tensorflow.keras.models import load_model
 
 import random
 import os
-
+import sys, getopt
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -39,7 +39,7 @@ class GetContext(Layer):
         scores_reshaped = tf.reshape(scores, [-1, scores.shape[1], 1])
         # Outputs:
         #   The output is the matrix product anal^t * scores_reshaped, ignoring the first dimension.
-        #   This is equivalent to summing all anal rows(timesteps) multiplied by their correspondent score
+        #   This is tequivalent to summing all anal rows(timesteps) multiplied by their correspondent score
         #   So, what this is doing is computing the context of the prediction
         #   The product outputs a (m, n, 1) which is reduced to (m, n)
         return tf.reshape(tf.matmul(tf.transpose(anal, perm=[0, 2, 1]), scores_reshaped), [-1, anal.shape[2]])
@@ -183,13 +183,19 @@ class Polenn:
         self.model = Model(inputs=X_in, outputs=Y)
         self.model.summary()
 
-    # Train the model with the specified parameters
-    def train(self, learning_rate=0.001, epochs=10, batch_size=128):
-
-        opt = Adam(learning_rate=learning_rate, beta_1 = 0.9, beta_2 = 0.99, epsilon=1e-7, clipnorm=1)
+    # Compile the model
+    def compile(self, learning_rate):
+        opt = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.99, epsilon=1e-7, clipnorm=1)
         self.model.compile(loss='mse', optimizer=opt, metrics=['mae'])
 
-        self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs=epochs, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
+        print('Compiled model with learning_rate =', learning_rate)
+
+    # Train the model with the specified parameters
+    def train(self, epochs, batch_size=128, save_freq=3):
+        print('Training for {} epochs with batch_size={} ...'.format((epochs // save_freq)*save_freq, batch_size))
+        for e in range(epochs // save_freq):
+            self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs=save_freq, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
+            self.save()
 
     # Plots the loss over time of last training
     def plot_loss(self):
@@ -248,13 +254,69 @@ class Polenn:
 
     # Save the model to a file
     def save(self):
+        print('Saving model...')
         self.model.save('model')
 
     # Load the model from file
     def load(self):
+        print('Loading model...')
         self.model = load_model('model', custom_objects={'get_X_anal': self.get_X_anal, 'get_X_pred': self.get_X_pred, 'get_X_j': self.get_X_j})
+
+
+def print_help(save_freq, epochs, learning_rate, batch_size):
+    print('Arguments:')
+    print('-h to print help')
+    print('-l to load model from file')
+    print('-s to set save frequency(default = {})'.format(save_freq))
+    print('-n to set number of epochs(default = {})'.format(epochs))
+    print('-r to set learning rate(default = {})'.format(learning_rate))
+    print('-b to set batch size(default = {})'.format(batch_size))
+
+
+def main(argv):
+    # Default values
+    save_freq = 3
+    epochs = 3
+    load = False
+    learning_rate = 0.005
+    batch_size = 256
+
+    try:
+        opts, args = getopt.getopt(argv, 'hls:n:r:b:')
+    except getopt.GetoptError:
+        print_help(save_freq, epochs, learning_rate, batch_size)
+        sys.exit(2)
+
+    for arg, value in opts:
+        # Print help
+        if arg == '-h':
+            print_help(save_freq, epochs, learning_rate, batch_size)
+        # Load model?
+        if arg == '-l':
+            load = True
+        # Save frequency
+        if arg == '-s':
+            save_freq = int(value)
+        # Number of epochs
+        if arg == '-n':
+            epochs = int(value)
+        # Learning rate
+        if arg == '-r':
+            learning_rate = float(value)
+        # Batch size
+        if arg == '-b':
+            batch_size = int(value)
+
+    model = Polenn()
+    if load:
+        model.load()
+    else:
+        model.create()
+
+    model.compile(learning_rate=learning_rate)
+    model.train(epochs=epochs, batch_size=batch_size)
 
 
 # Create the class automatically if running from main
 if __name__ == '__main__':
-    model = Polenn()
+    main(sys.argv[1:])
