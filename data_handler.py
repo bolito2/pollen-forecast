@@ -530,6 +530,12 @@ class DataHandler:
             data_file.create_dataset('mean', data=self.mean)
             data_file.create_dataset('std', data=self.std)
 
+    # Plot any feature in a given timespace
+    def plot(self, time_start=0, time_end=metadata.window_size, feature='pollen', station='madrid-subiza'):
+        feature_index = metadata.features.index(feature)
+        plt.plot(self.pooled_data[station][time_start:time_end, feature_index])
+        plt.show()
+
 
 # Create the class automatically if running from main
 if __name__ == '__main__':
