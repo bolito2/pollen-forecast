@@ -474,10 +474,9 @@ class DataHandler:
 
         with h5py.File(metadata.pooled_data_filename, 'r') as data_file:
             for station in metadata.pollen_stations:
-                if station in data_file.keys():
+                if station + '_data' in data_file.keys():
                     self.pooled_data[station] = np.array(data_file[station + '_data'])
                     self.holes[station] = np.array(data_file[station + '_holes'])
-
 
     # <<< POST-PROCESSING POOLED DATA >>>
 
@@ -511,15 +510,23 @@ class DataHandler:
 
     # Normalize data, split it into windows, then split those into analysis and prediction time-steps and finally
     # save the train/dev/test sets into the dataset, ready to feed them to the model
-    # TODO: Avoid having holes inside windows
     def save_train_data(self, train_rate=0.85, dev_rate=0.1):
         with h5py.File(metadata.train_data_filename, 'w') as data_file:
             XY_total = np.zeros((0, metadata.window_size, metadata.n))
 
             self.normalize_data()
 
+            # Data has holes in it and we don't want to include them into a window, so the data is divided as
+            # sub-arrays with the holes as boundaries, and windows are extracted from each of those
             for station in self.norm_data.keys():
-                XY_totametadatal = np.append(XY_total, DataHandler.sliding_windows(self.norm_data[station]), axis=0)
+                print('Windowing', station, '...')
+                # Split norm_data along its holes, which have to be inverted as they are counted from right to left
+                # Because of this they have to be negative and in flipped order
+                data_split = np.split(self.norm_data[station], -np.flip(self.holes[station]))
+
+                for clean_interval in data_split:
+                    if clean_interval.shape[0] > metadata.window_size:
+                        XY_total = np.append(XY_total, DataHandler.sliding_windows(clean_interval), axis=0)
 
             X_train, Y_train, X_dev, Y_dev, X_test, Y_test = DataHandler.split_data(XY_total, train_rate, dev_rate)
 
