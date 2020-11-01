@@ -234,7 +234,7 @@ class Polenn:
             pollen_std = f['std'][0]
 
             X_pred = np.array(self.X_dev[start_windows:start_windows+rows*4])
-            Y_pred = np.array(self.model(X_pred))
+            Y_pred = np.array(self.model.predict(X_pred))
             Y_true = np.array(self.Y_dev[start_windows:start_windows+rows*4])
 
             fig = plt.figure(figsize=(12, 12))
