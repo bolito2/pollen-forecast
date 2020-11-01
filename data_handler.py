@@ -24,6 +24,7 @@ class DataHandler:
     def __init__(self):
         self.pooled_data = dict()
         self.norm_data = dict()
+        self.holes = dict()
 
         self.coordinates = None
 
@@ -441,12 +442,14 @@ class DataHandler:
         for station in metadata.pollen_stations[start_index:]:
             if station not in metadata.excluded:
 
-                pollen_data = self.get_pollen_data(station)
+                pollen_data = self.get_pollen_data(station)  # Get the pollen data from file
                 start_date, end_date = DataHandler.get_date_range(pollen_data)
 
                 weather_data = DataHandler.get_aemet_data(start_date, end_date, station)
 
-                pollen_data, weather_data, _ = DataHandler.delete_holes(pollen_data, weather_data)
+                pollen_data, weather_data, holes = DataHandler.delete_holes(pollen_data, weather_data)
+                self.holes[station] = holes     # Save the holes into a dict
+
                 error, index = DataHandler.verify_data(pollen_data, weather_data)
                 if error:
                     if index >= 0:
@@ -462,7 +465,8 @@ class DataHandler:
     def save_pooled_data(self):
         with h5py.File(metadata.pooled_data_filename, 'w') as data_file:
             for station in self.pooled_data.keys():
-                data_file.create_dataset(station, data=self.pooled_data[station])
+                data_file.create_dataset(station + '_data', data=self.pooled_data[station])
+                data_file.create_dataset(station + '_holes', data=self.holes[station])
 
     # Read the pooled data from file
     def read_pooled_data(self):
@@ -471,7 +475,9 @@ class DataHandler:
         with h5py.File(metadata.pooled_data_filename, 'r') as data_file:
             for station in metadata.pollen_stations:
                 if station in data_file.keys():
-                    self.pooled_data[station] = np.array(data_file[station])
+                    self.pooled_data[station] = np.array(data_file[station + '_data'])
+                    self.holes[station] = np.array(data_file[station + '_holes'])
+
 
     # <<< POST-PROCESSING POOLED DATA >>>
 
@@ -513,7 +519,7 @@ class DataHandler:
             self.normalize_data()
 
             for station in self.norm_data.keys():
-                XY_total = np.append(XY_total, DataHandler.sliding_windows(self.norm_data[station]), axis=0)
+                XY_totametadatal = np.append(XY_total, DataHandler.sliding_windows(self.norm_data[station]), axis=0)
 
             X_train, Y_train, X_dev, Y_dev, X_test, Y_test = DataHandler.split_data(XY_total, train_rate, dev_rate)
 
