@@ -17,6 +17,8 @@ from tensorflow.keras.models import load_model
 import random
 import os
 
+import metadata
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Let's check that the GPU is detected
@@ -47,7 +49,7 @@ class GetContext(Layer):
 class Polenn:
     def __init__(self):
         # We import all the data, already prepared
-        f = h5py.File('pooled_data.h5', 'r')
+        f = h5py.File(metadata.train_data_filename, 'r')
 
         self.X_train, self.Y_train, self.X_dev, self.Y_dev, self.X_test, self.Y_test = np.array(f['X_train']), np.array(f['Y_train']), np.array(f['X_dev']), np.array(f['Y_dev']), f['X_test'], f['Y_test']
 

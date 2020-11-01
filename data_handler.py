@@ -460,8 +460,7 @@ class DataHandler:
 
     # Save the pooled data into a file
     def save_pooled_data(self):
-        os.remove(metadata.data_handler_filename)
-        with h5py.File(metadata.data_handler_filename, 'w') as data_file:
+        with h5py.File(metadata.pooled_data_filename, 'w') as data_file:
             for station in self.pooled_data.keys():
                 data_file.create_dataset(station, data=self.pooled_data[station])
 
@@ -469,7 +468,7 @@ class DataHandler:
     def read_pooled_data(self):
         self.pooled_data = dict()  # Reset pooled_data
 
-        with h5py.File(metadata.data_handler_filename, 'r') as data_file:
+        with h5py.File(metadata.pooled_data_filename, 'r') as data_file:
             for station in metadata.pollen_stations:
                 if station in data_file.keys():
                     self.pooled_data[station] = np.array(data_file[station])
@@ -508,7 +507,7 @@ class DataHandler:
     # save the train/dev/test sets into the dataset, ready to feed them to the model
     # TODO: Avoid having holes inside windows
     def save_train_data(self, train_rate=0.85, dev_rate=0.1):
-        with h5py.File(metadata.data_handler_filename, 'w') as data_file:
+        with h5py.File(metadata.train_data_filename, 'w') as data_file:
             XY_total = np.zeros((0, metadata.window_size, metadata.n))
 
             self.normalize_data()
