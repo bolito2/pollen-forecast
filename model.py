@@ -192,11 +192,8 @@ class Polenn:
         print('Compiled model with learning_rate =', learning_rate)
 
     # Train the model with the specified parameters
-    def train(self, epochs, batch_size=128, save_freq=3):
-        print('Training for {} epochs with batch_size={} ...'.format((epochs // save_freq)*save_freq, batch_size))
-        for e in range(epochs // save_freq):
-            self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs=save_freq, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
-            self.save()
+    def train(self, epochs, batch_size=128):
+        self.fitting = self.model.fit(self.X_train, self.Y_train, batch_size=batch_size, epochs=epochs, validation_data=(self.X_dev, self.Y_dev), shuffle=True)
 
     # Plots the loss over time of last training
     def plot_loss(self):
@@ -229,28 +226,27 @@ class Polenn:
     # v4.3 val_loss = 0.4 after 4 epochs
     #   - Added more cycles, removed altitude uwu
     # Prints some examples of predictions against real values
-    def print_predictions(self, rows=4):
+    def plot_predictions(self, rows=4):
         start_windows = random.randint(0, self.X_dev.shape[0] - rows*4)
 
-        f = h5py.File('pooled_data.h5', 'r')
+        with h5py.File(metadata.train_data_filename, 'r') as f:
+            pollen_mean = f['mean'][0]
+            pollen_std = f['std'][0]
 
-        pollen_mean = f['mean'][0]
-        pollen_std = f['std'][0]
+            X_pred = np.array(self.X_dev[start_windows:start_windows+rows*4])
+            Y_pred = np.array(self.model(X_pred))
+            Y_true = np.array(self.Y_dev[start_windows:start_windows+rows*4])
 
-        X_pred = np.array(self.X_dev[start_windows:start_windows+rows*4])
-        Y_pred = np.array(np.array(self.model(X_pred)))
-        Y_true = np.array(self.Y_dev[start_windows:start_windows+rows*4])
+            fig = plt.figure(figsize=(12, 12))
 
-        fig = plt.figure(figsize=(12, 12))
+            for i in range(rows*4):
+                a = fig.add_subplot(rows, 4, i + 1)
 
-        for i in range(rows*4):
-            a = fig.add_subplot(rows, 4, i + 1)
+                a.plot(range(self.window_size), X_pred[i, :, 0]*pollen_std + pollen_mean, color='b')
+                a.plot(range(self.anal_size, self.window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
+                a.plot(range(self.anal_size, self.window_size), Y_true[i]*pollen_std + pollen_mean, color='g')
 
-            a.plot(range(self.window_size), X_pred[i, :, 0]*pollen_std + pollen_mean, color='b')
-            a.plot(range(self.anal_size, self.window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')
-            a.plot(range(self.anal_size, self.window_size), Y_true[i]*pollen_std + pollen_mean, color='g')
-
-        plt.show()
+            plt.show()
 
     # Save the model to a file
     def save(self):
