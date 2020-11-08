@@ -99,7 +99,7 @@ class Polenn:
             return X[:, j:j+1, :]
 
     # Method to create the model from scratch
-    def create(self):
+    def create(self, units=64, anal_dropout=0, pred_dropout=0, verbose=True):
         # We get the input. THe first dimension(m) is omitted
         X_in = Input(shape=(self.window_size, self.n), name='Input')
 
@@ -109,7 +109,7 @@ class Polenn:
 
         # X_anal is passed through a LSTM that analyzes it and stores all it's outputs to apply the attention model later
         # The last hidden state is also stored, it will be used to start the prediction LSTM
-        anal, h_anal, c_anal = LSTM(64, return_sequences=True, return_state=True, name='analysis_top')(X_anal)
+        anal, h_anal, c_anal = LSTM(units, return_sequences=True, return_state=True, name='analysis_top', dropout=anal_dropout)(X_anal)
         state = [h_anal, c_anal]
 
         anal_time_steps_squeezed = []
@@ -140,7 +140,7 @@ class Polenn:
         concat_context = Concatenate(axis=1)
 
         # This is the LSTM that will predict the intermediate values before applying context
-        pred_LSTM = LSTM(64, return_state=True, name='prediction')
+        pred_LSTM = LSTM(units, return_state=True, name='prediction', dropout=pred_dropout)
 
         for i in range(self.pred_size):
             # In each prediction timestep, we prepare the list that saves the score of each analysis timestep output
@@ -182,14 +182,15 @@ class Polenn:
         Y = Concatenate(axis=1)(Y_list)
 
         self.model = Model(inputs=X_in, outputs=Y)
-        self.model.summary()
+        if verbose:
+            self.model.summary()
 
     # Compile the model
-    def compile(self, learning_rate):
-        opt = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.99, epsilon=1e-7, clipnorm=1)
+    def compile(self, learning_rate, clipnorm=.01):
+        opt = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.99, epsilon=1e-7, clipnorm=clipnorm)
         self.model.compile(loss='mse', optimizer=opt, metrics=['mae'])
 
-        print('Compiled model with learning_rate =', learning_rate)
+        print('Compiled model with learning_rate={} and clipnorm={}'.format(learning_rate, clipnorm))
 
     # Train the model with the specified parameters
     def train(self, epochs, batch_size=128):
@@ -241,6 +242,9 @@ class Polenn:
 
             for i in range(rows*4):
                 a = fig.add_subplot(rows, 4, i + 1)
+
+                axes = plt.gca()
+                axes.set_ylim([0, 1000])
 
                 a.plot(range(self.window_size), X_pred[i, :, 0]*pollen_std + pollen_mean, color='b')
                 a.plot(range(self.anal_size, self.window_size), Y_pred[i]*pollen_std + pollen_mean, color='r')

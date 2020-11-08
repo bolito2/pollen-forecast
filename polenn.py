@@ -35,7 +35,9 @@ def plot_args(argv):
 
     model = Polenn()
     model.load()
-    model.plot_predictions(rows)
+
+    while True:
+        model.plot_predictions(rows)
 
 
 # Parse parameters for training
@@ -45,7 +47,7 @@ def train_args(argv):
     cycles = 3
     load = False
     learning_rate = 0.005
-    batch_size = 256
+    batch_size = 128
 
     try:
         opts, args = getopt.getopt(argv, 'hlc:n:r:b:')
